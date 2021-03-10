@@ -83,6 +83,35 @@
 #define INDEXINTCELL_SIZE (16)
 #define INDEXLEAFCELL_SIZE (12)
 
+#define HEADER_BUF_SIZE (100)
+#define MAGIC_BUF_SIZE (16)
+#define DEFAULT_PAGE_SIZE (1024)
+
+#define PAGE_SIZE_OFFSET (16)
+#define PAGE_CACHE_SIZE_OFFSET (48)
+
+#define DEFAULT_PAGE_CACHE_SIZE (20000)
+
+#define MAGIC_NUM_1_OFFSET (18)
+#define MAGIC_NUM_2_OFFSET (20)
+#define MAGIC_NUM_3_OFFSET (32)
+#define MAGIC_NUM_4_OFFSET (36)
+#define MAGIC_NUM_5_OFFSET (44)
+#define MAGIC_NUM_6_OFFSET (52)
+#define MAGIC_NUM_7_OFFSET (56)
+#define MAGIC_NUM_8_OFFSET (64)
+
+#define DEFAULT_MAGIC_NUM_1 (0x0101)
+#define DEFAULT_MAGIC_NUM_2 (0x00402020)
+#define DEFAULT_MAGIC_NUM_3 (0x00)
+#define DEFAULT_MAGIC_NUM_4 (0x00)
+#define DEFAULT_MAGIC_NUM_5 (0x01)
+#define DEFAULT_MAGIC_NUM_6 (0x00)
+#define DEFAULT_MAGIC_NUM_7 (0x01)
+#define DEFAULT_MAGIC_NUM_8 (0x00)
+
+
+
 // Advance declarations
 typedef struct BTreeCell BTreeCell;
 typedef struct BTreeNode BTreeNode;

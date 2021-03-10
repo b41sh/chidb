@@ -80,6 +80,182 @@
 int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
 {
     /* Your code goes here */
+    char buf[HEADER_BUF_SIZE];
+    memset(buf, '\0', HEADER_BUF_SIZE);
+
+    uint16_t page_size = DEFAULT_PAGE_SIZE;
+    //uint32_t file_change_counter = 0;
+    //uint32_t schema_version = 0;
+    uint32_t page_cache_size = DEFAULT_PAGE_CACHE_SIZE;
+    //uint32_t user_cookie = 0;
+    npage_t n_pages = 1;
+
+    uint16_t magic_num_1 = 0x0101;
+    uint32_t magic_num_2 = 0x00402020;
+    uint32_t magic_num_3 = 0x00;
+    uint32_t magic_num_4 = 0x00;
+    uint32_t magic_num_5 = 0x01;
+    uint32_t magic_num_6 = 0x00;
+    uint32_t magic_num_7 = 0x01;
+    uint32_t magic_num_8 = 0x00;
+
+    uint8_t arr2[2];
+    uint8_t arr4[4];
+
+    FILE *fp;
+    int total_size = 0;
+    fp = fopen(filename, "rb+");
+    if (fp != NULL) {
+        fseek(fp, 0L, SEEK_END);
+        total_size = ftell(fp);
+        if (total_size > 0 && total_size < HEADER_BUF_SIZE) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+    }
+    if (fp == NULL || total_size == 0) {
+        if ((fp = fopen(filename, "wb+")) == NULL) {
+            return CHIDB_EIO;
+        }
+        memcpy(&buf, "SQLite format 3\0", MAGIC_BUF_SIZE);
+
+        arr2[0] = (page_size >> 8) & 0xff;
+        arr2[1] = page_size & 0xff;
+        memcpy(&buf[PAGE_SIZE_OFFSET], &arr2, sizeof(uint16_t));
+
+        arr4[0] = (page_cache_size >> 24) & 0xff;
+        arr4[1] = (page_cache_size >> 16) & 0xff;
+        arr4[2] = (page_cache_size >> 8) & 0xff;
+        arr4[3] = page_cache_size & 0xff;
+        memcpy(&buf[PAGE_CACHE_SIZE_OFFSET], &arr4, sizeof(uint32_t));
+
+        arr2[0] = (magic_num_1 >> 8) & 0xff;
+        arr2[1] = magic_num_1 & 0xff;
+        memcpy(&buf[MAGIC_NUM_1_OFFSET], &arr2, sizeof(uint16_t));
+
+        arr4[0] = (magic_num_2 >> 24) & 0xff;
+        arr4[1] = (magic_num_2 >> 16) & 0xff;
+        arr4[2] = (magic_num_2 >> 8) & 0xff;
+        arr4[3] = magic_num_2 & 0xff;
+        memcpy(&buf[MAGIC_NUM_2_OFFSET], &arr4, sizeof(uint32_t));
+
+        arr4[0] = (magic_num_5 >> 24) & 0xff;
+        arr4[1] = (magic_num_5 >> 16) & 0xff;
+        arr4[2] = (magic_num_5 >> 8) & 0xff;
+        arr4[3] = magic_num_5 & 0xff;
+        memcpy(&buf[MAGIC_NUM_5_OFFSET], &arr4, sizeof(uint32_t));
+
+        arr4[0] = (magic_num_7 >> 24) & 0xff;
+        arr4[1] = (magic_num_7 >> 16) & 0xff;
+        arr4[2] = (magic_num_7 >> 8) & 0xff;
+        arr4[3] = magic_num_7 & 0xff;
+        memcpy(&buf[MAGIC_NUM_7_OFFSET], &arr4, sizeof(uint32_t));
+
+        if (fwrite(buf, sizeof(buf), 1, fp) != 1) {
+            return CHIDB_EIO;
+        }
+
+        char page_buf[page_size - HEADER_BUF_SIZE];
+        memset(page_buf, '\0', sizeof(page_buf));
+
+        uint8_t type = PGTYPE_TABLE_LEAF;
+        memcpy(&page_buf[0], &type, sizeof(uint8_t));
+
+        arr2[0] = ((LEAFPG_CELLSOFFSET_OFFSET + HEADER_BUF_SIZE) >> 8) & 0xff;
+        arr2[1] = (LEAFPG_CELLSOFFSET_OFFSET + HEADER_BUF_SIZE) & 0xff;
+        memcpy(&page_buf[1], &arr2, sizeof(uint16_t));
+
+        arr2[0] = (0 >> 8) & 0xff;
+        arr2[1] = 0 & 0xff;
+        memcpy(&page_buf[3], &arr2, sizeof(uint16_t));
+
+        arr2[0] = (page_size >> 8) & 0xff;
+        arr2[1] = page_size & 0xff;
+        memcpy(&page_buf[5], &arr2, sizeof(uint16_t));
+
+        if (fwrite(page_buf, sizeof(page_buf), 1, fp) != 1) {
+            return CHIDB_EIO;
+        }
+
+        if (fflush(fp) != 0) {
+            return CHIDB_EIO;
+        }
+    } else {
+        fseek(fp, 0L, SEEK_SET);
+        if (fread(buf, sizeof(buf), 1, fp) != 1) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if(strncmp((char*)buf, "SQLite format 3\0", MAGIC_BUF_SIZE) != 0) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        page_size = (buf[PAGE_SIZE_OFFSET] << 8) | buf[PAGE_SIZE_OFFSET + 1];
+
+        page_cache_size = (buf[PAGE_CACHE_SIZE_OFFSET] << 24) | (buf[PAGE_CACHE_SIZE_OFFSET + 1] << 16) |
+            (buf[PAGE_CACHE_SIZE_OFFSET + 2] << 8) | buf[PAGE_CACHE_SIZE_OFFSET + 3];
+
+        if (page_cache_size != DEFAULT_PAGE_CACHE_SIZE) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+
+        magic_num_1 = (buf[MAGIC_NUM_1_OFFSET] << 8) | buf[MAGIC_NUM_1_OFFSET + 1];
+        magic_num_2 = (buf[MAGIC_NUM_2_OFFSET] << 24) | (buf[MAGIC_NUM_2_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_2_OFFSET + 2] << 8) | buf[MAGIC_NUM_2_OFFSET + 3];
+        magic_num_3 = (buf[MAGIC_NUM_3_OFFSET] << 24) | (buf[MAGIC_NUM_3_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_3_OFFSET + 2] << 8) | buf[MAGIC_NUM_3_OFFSET + 3];
+        magic_num_4 = (buf[MAGIC_NUM_4_OFFSET] << 24) | (buf[MAGIC_NUM_4_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_4_OFFSET + 2] << 8) | buf[MAGIC_NUM_4_OFFSET + 3];
+        magic_num_5 = (buf[MAGIC_NUM_5_OFFSET] << 24) | (buf[MAGIC_NUM_5_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_5_OFFSET + 2] << 8) | buf[MAGIC_NUM_5_OFFSET + 3];
+        magic_num_6 = (buf[MAGIC_NUM_6_OFFSET] << 24) | (buf[MAGIC_NUM_6_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_6_OFFSET + 2] << 8) | buf[MAGIC_NUM_6_OFFSET + 3];
+        magic_num_7 = (buf[MAGIC_NUM_7_OFFSET] << 24) | (buf[MAGIC_NUM_7_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_7_OFFSET + 2] << 8) | buf[MAGIC_NUM_7_OFFSET + 3];
+        magic_num_8 = (buf[MAGIC_NUM_8_OFFSET] << 24) | (buf[MAGIC_NUM_8_OFFSET + 1] << 16) |
+            (buf[MAGIC_NUM_8_OFFSET + 2] << 8) | buf[MAGIC_NUM_8_OFFSET + 3];
+
+        if (magic_num_1 != DEFAULT_MAGIC_NUM_1) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_2 != DEFAULT_MAGIC_NUM_2) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_3 != DEFAULT_MAGIC_NUM_3) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_4 != DEFAULT_MAGIC_NUM_4) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_5 != DEFAULT_MAGIC_NUM_5) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_6 != DEFAULT_MAGIC_NUM_6) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_7 != DEFAULT_MAGIC_NUM_7) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+        if (magic_num_8 != DEFAULT_MAGIC_NUM_8) {
+            return CHIDB_ECORRUPTHEADER;
+        }
+
+        n_pages = total_size / page_size;
+    }
+
+    Pager *pager;
+    pager = malloc(sizeof(Pager));
+    if (pager == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    pager->f = fp;
+    pager->n_pages = n_pages;
+    pager->page_size = page_size;
+
+    *bt = malloc(sizeof(Btree));
+    if (*bt == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    (*bt)->db = db;
+    (*bt)->pager = pager;
+    db->bt = *bt;
 
     return CHIDB_OK;
 }
@@ -100,6 +276,9 @@ int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
 int chidb_Btree_close(BTree *bt)
 {
     /* Your code goes here */
+    if (fclose(bt->pager->f) != 0) {
+        return CHIDB_EIO;
+    }
 
     return CHIDB_OK;
 }
@@ -129,6 +308,49 @@ int chidb_Btree_close(BTree *bt)
 int chidb_Btree_getNodeByPage(BTree *bt, npage_t npage, BTreeNode **btn)
 {
     /* Your code goes here */
+    if (npage > bt->pager->n_pages || npage < 1) {
+        return CHIDB_EPAGENO;
+    }
+    int buf_size = bt->pager->page_size;
+    uint8_t *buf = malloc(buf_size);
+    if (buf == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    long offset = (long)bt->pager->page_size * (npage - 1);
+    if (fseek(bt->pager->f, offset, SEEK_SET) != 0) {
+        return CHIDB_EIO;
+    }
+    if (fread(buf, buf_size, 1, bt->pager->f) != 1) {
+        return CHIDB_ECORRUPTHEADER;
+    }
+
+    MemPage *mem_page;
+    mem_page = malloc(sizeof(MemPage));
+    if (mem_page == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    mem_page->npage = npage;
+    mem_page->data = buf;
+    int off = 0;
+    if (npage == 1) {
+        off += HEADER_BUF_SIZE;
+    }
+    *btn = malloc(sizeof(BTreeNode));
+    if (*btn == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    (*btn)->page = mem_page;
+    (*btn)->type = buf[off + 0];
+    (*btn)->free_offset = (buf[off + 1] << 8) | buf[off + 2];
+    (*btn)->n_cells = (buf[off + 3] << 8) | buf[off + 4];
+    (*btn)->cells_offset = (buf[off + 5] << 8) | buf[off + 6];
+    if ((*btn)->type == PGTYPE_TABLE_INTERNAL || (*btn)->type == PGTYPE_INDEX_INTERNAL) {
+        (*btn)->right_page = (buf[off + 8] << 24) | (buf[off + 9] << 16) | (buf[off + 10] << 8) | buf[off + 11];
+        (*btn)->celloffset_array = buf + off + INTPG_CELLSOFFSET_OFFSET;
+    } else {
+        (*btn)->right_page = 0;
+        (*btn)->celloffset_array = buf + off + LEAFPG_CELLSOFFSET_OFFSET;
+    }
 
     return CHIDB_OK;
 }
@@ -150,6 +372,9 @@ int chidb_Btree_getNodeByPage(BTree *bt, npage_t npage, BTreeNode **btn)
 int chidb_Btree_freeMemNode(BTree *bt, BTreeNode *btn)
 {
     /* Your code goes here */
+    free(btn->page->data);
+    free(btn->page);
+    free(btn);
 
     return CHIDB_OK;
 }
@@ -174,8 +399,8 @@ int chidb_Btree_freeMemNode(BTree *bt, BTreeNode *btn)
 int chidb_Btree_newNode(BTree *bt, npage_t *npage, uint8_t type)
 {
     /* Your code goes here */
-
-    return CHIDB_OK;
+    *npage = ++bt->pager->n_pages;
+    return chidb_Btree_initEmptyNode(bt, *npage, type);
 }
 
 
@@ -199,6 +424,43 @@ int chidb_Btree_newNode(BTree *bt, npage_t *npage, uint8_t type)
 int chidb_Btree_initEmptyNode(BTree *bt, npage_t npage, uint8_t type)
 {
     /* Your code goes here */
+    char *page_buf = malloc(bt->pager->page_size);
+    if (page_buf == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    memset(page_buf, '\0', bt->pager->page_size);
+
+    uint16_t free_offset;
+    ncell_t n_cells = 0;
+    uint16_t cells_offset = bt->pager->page_size;
+    //npage_t right_page;
+    if (type == PGTYPE_TABLE_INTERNAL || type == PGTYPE_INDEX_INTERNAL) {
+        free_offset = INTPG_CELLSOFFSET_OFFSET;
+    } else {
+        free_offset = LEAFPG_CELLSOFFSET_OFFSET;
+    }
+
+    uint8_t arr2[2];
+    memcpy(&page_buf[PGHEADER_PGTYPE_OFFSET], &type, sizeof(uint8_t));
+
+    arr2[0] = (free_offset >> 8) & 0xff;
+    arr2[1] = free_offset & 0xff;
+    memcpy(&page_buf[PGHEADER_FREE_OFFSET], &arr2, sizeof(uint16_t));
+    arr2[0] = (n_cells >> 8) & 0xff;
+    arr2[1] = n_cells & 0xff;
+    memcpy(&page_buf[PGHEADER_NCELLS_OFFSET], &arr2, sizeof(uint16_t));
+    arr2[0] = (cells_offset >> 8) & 0xff;
+    arr2[1] = cells_offset & 0xff;
+    memcpy(&page_buf[PGHEADER_CELL_OFFSET], &arr2, sizeof(uint16_t));
+
+    long offset = (long)((npage - 1) * bt->pager->page_size);
+    fseek(bt->pager->f, offset, SEEK_SET);
+    if (fwrite(page_buf, bt->pager->page_size, 1, bt->pager->f) != 1) {
+        return CHIDB_EIO;
+    }
+    if (fflush(bt->pager->f) != 0) {
+        return CHIDB_EIO;
+    }
 
     return CHIDB_OK;
 }
@@ -225,6 +487,37 @@ int chidb_Btree_initEmptyNode(BTree *bt, npage_t npage, uint8_t type)
 int chidb_Btree_writeNode(BTree *bt, BTreeNode *btn)
 {
     /* Your code goes here */
+    int page_off = 0;
+    if (btn->page->npage == 1) {
+        page_off = 100;
+    }
+    uint8_t arr2[2];
+    uint8_t arr4[4];
+    memcpy(&btn->page->data[page_off], &btn->type, sizeof(uint8_t));
+    arr2[0] = (btn->free_offset >> 8) & 0xff;
+    arr2[1] = btn->free_offset & 0xff;
+    memcpy(&btn->page->data[page_off + 1], &arr2, sizeof(uint16_t));
+    arr2[0] = (btn->n_cells >> 8) & 0xff;
+    arr2[1] = btn->n_cells & 0xff;
+    memcpy(&btn->page->data[page_off + 3], &arr2, sizeof(uint16_t));
+    arr2[0] = (btn->cells_offset >> 8) & 0xff;
+    arr2[1] = btn->cells_offset & 0xff;
+    memcpy(&btn->page->data[page_off + 5], &arr2, sizeof(uint16_t));
+    if (btn->type == PGTYPE_TABLE_INTERNAL || btn->type == PGTYPE_INDEX_INTERNAL) {
+        arr4[0] = (btn->right_page >> 24) & 0xff;
+        arr4[1] = (btn->right_page >> 16) & 0xff;
+        arr4[2] = (btn->right_page >> 8) & 0xff;
+        arr4[3] = btn->right_page & 0xff;
+        memcpy(&btn->page->data[page_off + 8], &arr4, sizeof(uint32_t));
+    }
+    long offset = (long)((btn->page->npage - 1) * bt->pager->page_size);
+    fseek(bt->pager->f, offset, SEEK_SET);
+    if (fwrite(btn->page->data, bt->pager->page_size, 1, bt->pager->f) != 1) {
+        return CHIDB_EIO;
+    }
+    if (fflush(bt->pager->f) != 0) {
+        return CHIDB_EIO;
+    }
 
     return CHIDB_OK;
 }
