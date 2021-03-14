@@ -192,6 +192,8 @@ int chidb_dbm_op_Key (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Integer (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    stmt->reg[op->p2].type = REG_INT32;
+    stmt->reg[op->p2].value.i = op->p1;
 
     return CHIDB_OK;
 }
@@ -200,6 +202,8 @@ int chidb_dbm_op_Integer (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_String (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    stmt->reg[op->p2].type = REG_STRING;
+    stmt->reg[op->p2].value.s = op->p4;
 
     return CHIDB_OK;
 }
@@ -208,10 +212,9 @@ int chidb_dbm_op_String (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Null (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    stmt->reg[op->p2].type = REG_NULL;
 
     return CHIDB_OK;
-
-    return 0;
 }
 
 
@@ -242,6 +245,23 @@ int chidb_dbm_op_Insert (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Eq (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p3].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i == stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) == 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -250,6 +270,23 @@ int chidb_dbm_op_Eq (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Ne (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p1].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i != stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) != 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -258,6 +295,23 @@ int chidb_dbm_op_Ne (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Lt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p3].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i < stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) < 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -266,6 +320,23 @@ int chidb_dbm_op_Lt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Le (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p3].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i <= stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) <= 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -274,6 +345,23 @@ int chidb_dbm_op_Le (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Gt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p3].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i > stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) > 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -282,6 +370,23 @@ int chidb_dbm_op_Gt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Ge (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    if (stmt->reg[op->p1].type != stmt->reg[op->p3].type) {
+        return CHIDB_EPARSE;
+    }
+    switch (stmt->reg[op->p3].type) {
+    case REG_INT32:
+        if (stmt->reg[op->p3].value.i >= stmt->reg[op->p1].value.i) {
+            stmt->pc = op->p2;
+        }
+        break;
+    case REG_STRING:
+        if (strcmp(stmt->reg[op->p3].value.s, stmt->reg[op->p1].value.s) >= 0) {
+            stmt->pc = op->p2;
+        }
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -407,7 +512,8 @@ int chidb_dbm_op_SCopy (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Halt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    stmt->pc = stmt->nOps;
 
-    return CHIDB_OK;
+    return op->p1;
 }
 
