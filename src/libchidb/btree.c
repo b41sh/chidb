@@ -703,9 +703,53 @@ int chidb_Btree_insertCell(BTreeNode *btn, ncell_t ncell, BTreeCell *cell)
 
         break;
     case PGTYPE_INDEX_INTERNAL:
+        cell_off -= INDEXINTCELL_SIZE;
+
+        arr4[0] = (cell->fields.indexInternal.child_page >> 24) & 0xff;
+        arr4[1] = (cell->fields.indexInternal.child_page >> 16) & 0xff;
+        arr4[2] = (cell->fields.indexInternal.child_page >> 8) & 0xff;
+        arr4[3] = cell->fields.indexInternal.child_page & 0xff;
+        memcpy(&btn->page->data[cell_off + INDEXINTCELL_CHILD_OFFSET], &arr4, 4);
+
+        arr4[0] = 0x0B;
+        arr4[1] = 0x03;
+        arr4[2] = 0x04;
+        arr4[3] = 0x04;
+        memcpy(&btn->page->data[cell_off + INDEXINTCELL_CHILD_OFFSET + 4], &arr4, 4);
+
+        arr4[0] = (cell->key >> 24) & 0xff;
+        arr4[1] = (cell->key >> 16) & 0xff;
+        arr4[2] = (cell->key >> 8) & 0xff;
+        arr4[3] = cell->key & 0xff;
+        memcpy(&btn->page->data[cell_off + INDEXINTCELL_KEYIDX_OFFSET], &arr4, 4);
+
+        arr4[0] = (cell->fields.indexInternal.keyPk >> 24) & 0xff;
+        arr4[1] = (cell->fields.indexInternal.keyPk >> 16) & 0xff;
+        arr4[2] = (cell->fields.indexInternal.keyPk >> 8) & 0xff;
+        arr4[3] = cell->fields.indexInternal.keyPk & 0xff;
+        memcpy(&btn->page->data[cell_off + INDEXINTCELL_KEYPK_OFFSET], &arr4, 4);
 
         break;
     case PGTYPE_INDEX_LEAF:
+        cell_off -= INDEXLEAFCELL_SIZE;
+
+        arr4[0] = 0x0B;
+        arr4[1] = 0x03;
+        arr4[2] = 0x04;
+        arr4[3] = 0x04;
+        memcpy(&btn->page->data[cell_off + INDEXLEAFCELL_SIZE_OFFSET], &arr4, 4);
+
+        arr4[0] = (cell->key >> 24) & 0xff;
+        arr4[1] = (cell->key >> 16) & 0xff;
+        arr4[2] = (cell->key >> 8) & 0xff;
+        arr4[3] = cell->key & 0xff;
+        memcpy(&btn->page->data[cell_off + INDEXLEAFCELL_KEYIDX_OFFSET], &arr4, 4);
+
+        arr4[0] = (cell->fields.indexLeaf.keyPk >> 24) & 0xff;
+        arr4[1] = (cell->fields.indexLeaf.keyPk >> 16) & 0xff;
+        arr4[2] = (cell->fields.indexLeaf.keyPk >> 8) & 0xff;
+        arr4[3] = cell->fields.indexLeaf.keyPk & 0xff;
+        memcpy(&btn->page->data[cell_off + INDEXLEAFCELL_KEYPK_OFFSET], &arr4, 4);
 
         break;
     }
@@ -865,8 +909,15 @@ int chidb_Btree_insertInTable(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t
 int chidb_Btree_insertInIndex(BTree *bt, npage_t nroot, chidb_key_t keyIdx, chidb_key_t keyPk)
 {
     /* Your code goes here */
+    BTreeCell *btc = malloc(sizeof(BTreeCell));
+    if (btc == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    btc->type = PGTYPE_INDEX_LEAF;
+    btc->key = keyIdx;
+    btc->fields.indexLeaf.keyPk = keyPk;
 
-    return CHIDB_OK;
+    return chidb_Btree_insert(bt, nroot, btc);
 }
 
 
@@ -931,7 +982,7 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
     }
     if (is_root_full == 1) {
         BTreeCell root_btc;
-        ncell_t mid_cell = btn->n_cells / 2 - 1;
+        ncell_t mid_cell = (btn->n_cells - 1) / 2;
         // write left child node
         npage_t left_page;
         BTreeNode *left_btn;
@@ -943,7 +994,12 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
         if (ret != CHIDB_OK) {
             return ret;
         }
-        for (ncell_t i = 0; i <= mid_cell; i++) {
+        // insert left cell
+        ncell_t left_mid_cell = mid_cell;
+        if (btn->type == PGTYPE_INDEX_INTERNAL || btn->type == PGTYPE_INDEX_LEAF) {
+            left_mid_cell--;
+        }
+        for (ncell_t i = 0; i <= left_mid_cell; i++) {
             ret = chidb_Btree_getCell(btn, i, &root_btc);
             if (ret != CHIDB_OK) {
                 return ret;
@@ -1026,8 +1082,6 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
             return ret;
         }
     }
-    if (btn->n_cells == 0) {
-    }
 
     return chidb_Btree_insertNonFull(bt, nroot, btc);
 }
@@ -1103,12 +1157,13 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
     // 1. find child node, if no exist, create one
     // 2. check child node is full, if so split it
     // 3. insert cell to child node
-    ncell_t parent_cell = 0;
-    npage_t child_page = 0;
+    ncell_t parent_cell = btn->n_cells;
+    npage_t child_page = btn->right_page;
     BTreeCell *search_btc = malloc(sizeof(BTreeCell));
     if (search_btc == NULL) {
         return CHIDB_ENOMEM;
     }
+    uint8_t find_child = 0;
     for (ncell_t i = 0; i < btn->n_cells; i++) {
         ret = chidb_Btree_getCell(btn, i, search_btc);
         if (ret != CHIDB_OK) {
@@ -1119,31 +1174,21 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
             if (btc->key <= search_btc->key) {
                 parent_cell = i;
                 child_page = search_btc->fields.tableInternal.child_page;
+                find_child = 1;
             }
             break;
         case PGTYPE_INDEX_INTERNAL:
-            if (btc->key <= search_btc->key) {
+            if (btc->key == search_btc->key) {
+                return CHIDB_EDUPLICATE;
+            } else if (btc->key < search_btc->key) {
                 parent_cell = i;
                 child_page = search_btc->fields.indexInternal.child_page;
+                find_child = 1;
             }
             break;
         }
-        if (child_page > 0) {
+        if (find_child == 1) {
             break;
-        }
-    }
-    // get child from right page
-    if (child_page == 0) {
-        switch (btn->type) {
-        case PGTYPE_TABLE_INTERNAL:
-            child_page = btn->right_page;
-            break;
-        case PGTYPE_INDEX_INTERNAL:
-            child_page = btn->right_page;
-            break;
-        }
-        if (child_page > 0) {
-            parent_cell = btn->n_cells;
         }
     }
 
@@ -1198,7 +1243,7 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
                 return ret;
             }
             if (btc->key <= search_btc->key) {
-                child_page = search_btc->fields.tableInternal.child_page;
+                child_page = child_page2;
             }
         }
     } else {
@@ -1236,6 +1281,9 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
         ret = chidb_Btree_writeNode(bt, btn);
         if (ret != CHIDB_OK) {
             return ret;
+        }
+        if (btn->type == PGTYPE_INDEX_INTERNAL) {
+            return CHIDB_OK;
         }
     }
 
@@ -1316,9 +1364,13 @@ int chidb_Btree_split(BTree *bt, npage_t npage_parent, npage_t npage_child, ncel
     }
 
     BTreeCell orig_btc;
-    ncell_t mid_cell = orig_btn->n_cells / 2 - 1;
+    ncell_t mid_cell = (orig_btn->n_cells - 1) / 2;
     // insert left cell
-    for (ncell_t i = 0; i <= mid_cell; i++) {
+    ncell_t left_mid_cell = mid_cell;
+    if (parent_btn->type == PGTYPE_INDEX_INTERNAL || parent_btn->type == PGTYPE_INDEX_LEAF) {
+        left_mid_cell--;
+    }
+    for (ncell_t i = 0; i <= left_mid_cell; i++) {
         ret = chidb_Btree_getCell(orig_btn, i, &orig_btc);
         if (ret != CHIDB_OK) {
             return ret;
@@ -1366,6 +1418,7 @@ int chidb_Btree_split(BTree *bt, npage_t npage_parent, npage_t npage_child, ncel
         break;
     case PGTYPE_INDEX_INTERNAL:
         new_btc.fields.indexInternal.child_page = left_page;
+        new_btc.fields.indexInternal.keyPk = orig_btc.fields.indexInternal.keyPk;
         break;
     }
     ret = chidb_Btree_insertCell(parent_btn, parent_ncell, &new_btc);
