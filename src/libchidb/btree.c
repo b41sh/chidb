@@ -80,15 +80,13 @@
 int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
 {
     /* Your code goes here */
-    char buf[HEADER_BUF_SIZE];
-    memset(buf, '\0', HEADER_BUF_SIZE);
-
+    int ret;
     uint16_t page_size = DEFAULT_PAGE_SIZE;
     //uint32_t file_change_counter = 0;
     //uint32_t schema_version = 0;
     uint32_t page_cache_size = DEFAULT_PAGE_CACHE_SIZE;
     //uint32_t user_cookie = 0;
-    npage_t n_pages = 1;
+    //npage_t n_pages = 1;
 
     uint16_t magic_num_1 = 0x0101;
     uint32_t magic_num_2 = 0x00402020;
@@ -102,88 +100,85 @@ int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
     uint8_t arr2[2];
     uint8_t arr4[4];
 
-    FILE *fp;
-    int total_size = 0;
-    fp = fopen(filename, "rb+");
-    if (fp != NULL) {
-        fseek(fp, 0L, SEEK_END);
-        total_size = ftell(fp);
-        if (total_size > 0 && total_size < HEADER_BUF_SIZE) {
-            return CHIDB_ECORRUPTHEADER;
-        }
+    Pager *pager;
+    if ((ret = chidb_Pager_open(&pager, filename)) != CHIDB_OK) {
+        return ret;
     }
-    if (fp == NULL || total_size == 0) {
-        if ((fp = fopen(filename, "wb+")) == NULL) {
-            return CHIDB_EIO;
+    uint8_t *buf = malloc(HEADER_BUF_SIZE);
+    if (buf == NULL) {
+        return CHIDB_ENOMEM;
+    }
+    ret = chidb_Pager_readHeader(pager, buf);
+    if (ret == CHIDB_NOHEADER) {
+        MemPage *memPage = malloc(sizeof(MemPage));
+        if (memPage == NULL) {
+            return CHIDB_ENOMEM;
         }
-        memcpy(&buf, "SQLite format 3\0", MAGIC_BUF_SIZE);
+        if ((ret = chidb_Pager_allocatePage(pager, &memPage->npage)) != CHIDB_OK) {
+            return ret;
+        }
+        memPage->data = malloc(page_size);
+        if (memPage->data == NULL) {
+            return CHIDB_ENOMEM;
+        }
+        memset(memPage->data, '\0', page_size);
+        memcpy(&memPage->data[0], "SQLite format 3\0", MAGIC_BUF_SIZE);
 
         arr2[0] = (page_size >> 8) & 0xff;
         arr2[1] = page_size & 0xff;
-        memcpy(&buf[PAGE_SIZE_OFFSET], &arr2, sizeof(uint16_t));
+        memcpy(&memPage->data[PAGE_SIZE_OFFSET], &arr2, sizeof(uint16_t));
 
         arr4[0] = (page_cache_size >> 24) & 0xff;
         arr4[1] = (page_cache_size >> 16) & 0xff;
         arr4[2] = (page_cache_size >> 8) & 0xff;
         arr4[3] = page_cache_size & 0xff;
-        memcpy(&buf[PAGE_CACHE_SIZE_OFFSET], &arr4, sizeof(uint32_t));
+        memcpy(&memPage->data[PAGE_CACHE_SIZE_OFFSET], &arr4, sizeof(uint32_t));
 
         arr2[0] = (magic_num_1 >> 8) & 0xff;
         arr2[1] = magic_num_1 & 0xff;
-        memcpy(&buf[MAGIC_NUM_1_OFFSET], &arr2, sizeof(uint16_t));
+        memcpy(&memPage->data[MAGIC_NUM_1_OFFSET], &arr2, sizeof(uint16_t));
 
         arr4[0] = (magic_num_2 >> 24) & 0xff;
         arr4[1] = (magic_num_2 >> 16) & 0xff;
         arr4[2] = (magic_num_2 >> 8) & 0xff;
         arr4[3] = magic_num_2 & 0xff;
-        memcpy(&buf[MAGIC_NUM_2_OFFSET], &arr4, sizeof(uint32_t));
+        memcpy(&memPage->data[MAGIC_NUM_2_OFFSET], &arr4, sizeof(uint32_t));
 
         arr4[0] = (magic_num_5 >> 24) & 0xff;
         arr4[1] = (magic_num_5 >> 16) & 0xff;
         arr4[2] = (magic_num_5 >> 8) & 0xff;
         arr4[3] = magic_num_5 & 0xff;
-        memcpy(&buf[MAGIC_NUM_5_OFFSET], &arr4, sizeof(uint32_t));
+        memcpy(&memPage->data[MAGIC_NUM_5_OFFSET], &arr4, sizeof(uint32_t));
 
         arr4[0] = (magic_num_7 >> 24) & 0xff;
         arr4[1] = (magic_num_7 >> 16) & 0xff;
         arr4[2] = (magic_num_7 >> 8) & 0xff;
         arr4[3] = magic_num_7 & 0xff;
-        memcpy(&buf[MAGIC_NUM_7_OFFSET], &arr4, sizeof(uint32_t));
-
-        if (fwrite(buf, sizeof(buf), 1, fp) != 1) {
-            return CHIDB_EIO;
-        }
-
-        char page_buf[page_size - HEADER_BUF_SIZE];
-        memset(page_buf, '\0', sizeof(page_buf));
+        memcpy(&memPage->data[MAGIC_NUM_7_OFFSET], &arr4, sizeof(uint32_t));
 
         uint8_t type = PGTYPE_TABLE_LEAF;
-        memcpy(&page_buf[0], &type, sizeof(uint8_t));
+        memcpy(&memPage->data[HEADER_OFFSET + PGHEADER_PGTYPE_OFFSET], &type, sizeof(uint8_t));
 
-        arr2[0] = ((LEAFPG_CELLSOFFSET_OFFSET + HEADER_BUF_SIZE) >> 8) & 0xff;
-        arr2[1] = (LEAFPG_CELLSOFFSET_OFFSET + HEADER_BUF_SIZE) & 0xff;
-        memcpy(&page_buf[1], &arr2, sizeof(uint16_t));
+        arr2[0] = ((HEADER_OFFSET + LEAFPG_CELLSOFFSET_OFFSET) >> 8) & 0xff;
+        arr2[1] = (HEADER_OFFSET + LEAFPG_CELLSOFFSET_OFFSET) & 0xff;
+        memcpy(&memPage->data[HEADER_OFFSET + PGHEADER_FREE_OFFSET], &arr2, sizeof(uint16_t));
 
         arr2[0] = (0 >> 8) & 0xff;
         arr2[1] = 0 & 0xff;
-        memcpy(&page_buf[3], &arr2, sizeof(uint16_t));
+        memcpy(&memPage->data[HEADER_OFFSET + PGHEADER_NCELLS_OFFSET], &arr2, sizeof(uint16_t));
 
         arr2[0] = (page_size >> 8) & 0xff;
         arr2[1] = page_size & 0xff;
-        memcpy(&page_buf[5], &arr2, sizeof(uint16_t));
+        memcpy(&memPage->data[HEADER_OFFSET + PGHEADER_CELL_OFFSET], &arr2, sizeof(uint16_t));
 
-        if (fwrite(page_buf, sizeof(page_buf), 1, fp) != 1) {
-            return CHIDB_EIO;
+        pager->page_size = page_size;
+        if ((ret = chidb_Pager_writePage(pager, memPage)) != CHIDB_OK) {
+            return ret;
         }
-
-        if (fflush(fp) != 0) {
-            return CHIDB_EIO;
+        if ((ret = chidb_Pager_releaseMemPage(pager, memPage)) != CHIDB_OK) {
+            return ret;
         }
     } else {
-        fseek(fp, 0L, SEEK_SET);
-        if (fread(buf, sizeof(buf), 1, fp) != 1) {
-            return CHIDB_ECORRUPTHEADER;
-        }
         if(strncmp((char*)buf, "SQLite format 3\0", MAGIC_BUF_SIZE) != 0) {
             return CHIDB_ECORRUPTHEADER;
         }
@@ -236,18 +231,11 @@ int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
         if (magic_num_8 != DEFAULT_MAGIC_NUM_8) {
             return CHIDB_ECORRUPTHEADER;
         }
-
-        n_pages = total_size / page_size;
+        pager->page_size = page_size;
+        if ((ret = chidb_Pager_getRealDBSize(pager, &pager->n_pages)) != CHIDB_OK) {
+            return ret;
+        }
     }
-
-    Pager *pager;
-    pager = malloc(sizeof(Pager));
-    if (pager == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    pager->f = fp;
-    pager->n_pages = n_pages;
-    pager->page_size = page_size;
 
     *bt = malloc(sizeof(Btree));
     if (*bt == NULL) {
@@ -276,9 +264,11 @@ int chidb_Btree_open(const char *filename, chidb *db, BTree **bt)
 int chidb_Btree_close(BTree *bt)
 {
     /* Your code goes here */
-    if (fclose(bt->pager->f) != 0) {
-        return CHIDB_EIO;
+    int ret;
+    if ((ret = chidb_Pager_close(bt->pager)) != CHIDB_OK) {
+        return ret;
     }
+    free(bt);
 
     return CHIDB_OK;
 }
@@ -311,26 +301,11 @@ int chidb_Btree_getNodeByPage(BTree *bt, npage_t npage, BTreeNode **btn)
     if (npage > bt->pager->n_pages || npage < 1) {
         return CHIDB_EPAGENO;
     }
-    int buf_size = bt->pager->page_size;
-    uint8_t *buf = malloc(buf_size);
-    if (buf == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    long offset = (long)bt->pager->page_size * (npage - 1);
-    if (fseek(bt->pager->f, offset, SEEK_SET) != 0) {
-        return CHIDB_EIO;
-    }
-    if (fread(buf, buf_size, 1, bt->pager->f) != 1) {
-        return CHIDB_ECORRUPTHEADER;
-    }
-
+    int ret;
     MemPage *mem_page;
-    mem_page = malloc(sizeof(MemPage));
-    if (mem_page == NULL) {
-        return CHIDB_ENOMEM;
+    if ((ret = chidb_Pager_readPage(bt->pager, npage, &mem_page)) != CHIDB_OK) {
+        return ret;
     }
-    mem_page->npage = npage;
-    mem_page->data = buf;
     int off = 0;
     if (npage == 1) {
         off += HEADER_BUF_SIZE;
@@ -340,16 +315,22 @@ int chidb_Btree_getNodeByPage(BTree *bt, npage_t npage, BTreeNode **btn)
         return CHIDB_ENOMEM;
     }
     (*btn)->page = mem_page;
-    (*btn)->type = buf[off + 0];
-    (*btn)->free_offset = (buf[off + 1] << 8) | buf[off + 2];
-    (*btn)->n_cells = (buf[off + 3] << 8) | buf[off + 4];
-    (*btn)->cells_offset = (buf[off + 5] << 8) | buf[off + 6];
+    (*btn)->type = mem_page->data[off + 0];
+    (*btn)->free_offset = (mem_page->data[off + 1] << 8) |
+                            mem_page->data[off + 2];
+    (*btn)->n_cells = (mem_page->data[off + 3] << 8) |
+                            mem_page->data[off + 4];
+    (*btn)->cells_offset = (mem_page->data[off + 5] << 8) |
+                            mem_page->data[off + 6];
     if ((*btn)->type == PGTYPE_TABLE_INTERNAL || (*btn)->type == PGTYPE_INDEX_INTERNAL) {
-        (*btn)->right_page = (buf[off + 8] << 24) | (buf[off + 9] << 16) | (buf[off + 10] << 8) | buf[off + 11];
-        (*btn)->celloffset_array = buf + off + INTPG_CELLSOFFSET_OFFSET;
+        (*btn)->right_page = (mem_page->data[off + 8] << 24) |
+                            (mem_page->data[off + 9] << 16) |
+                            (mem_page->data[off + 10] << 8) |
+                            mem_page->data[off + 11];
+        (*btn)->celloffset_array = mem_page->data + off + INTPG_CELLSOFFSET_OFFSET;
     } else {
         (*btn)->right_page = 0;
-        (*btn)->celloffset_array = buf + off + LEAFPG_CELLSOFFSET_OFFSET;
+        (*btn)->celloffset_array = mem_page->data + off + LEAFPG_CELLSOFFSET_OFFSET;
     }
 
     return CHIDB_OK;
@@ -372,10 +353,11 @@ int chidb_Btree_getNodeByPage(BTree *bt, npage_t npage, BTreeNode **btn)
 int chidb_Btree_freeMemNode(BTree *bt, BTreeNode *btn)
 {
     /* Your code goes here */
-    free(btn->page->data);
-    free(btn->page);
+    int ret = chidb_Pager_releaseMemPage(bt->pager, btn->page);
     free(btn);
-
+    if (ret != CHIDB_OK) {
+        return ret;
+    }
     return CHIDB_OK;
 }
 
@@ -399,7 +381,10 @@ int chidb_Btree_freeMemNode(BTree *bt, BTreeNode *btn)
 int chidb_Btree_newNode(BTree *bt, npage_t *npage, uint8_t type)
 {
     /* Your code goes here */
-    *npage = ++bt->pager->n_pages;
+    int ret;
+    if ((ret = chidb_Pager_allocatePage(bt->pager, npage)) != CHIDB_OK) {
+        return ret;
+    }
     return chidb_Btree_initEmptyNode(bt, *npage, type);
 }
 
@@ -424,20 +409,17 @@ int chidb_Btree_newNode(BTree *bt, npage_t *npage, uint8_t type)
 int chidb_Btree_initEmptyNode(BTree *bt, npage_t npage, uint8_t type)
 {
     /* Your code goes here */
-    char *page_buf = malloc(bt->pager->page_size);
-    if (page_buf == NULL) {
-        return CHIDB_ENOMEM;
+    int ret;
+    MemPage *mem_page;
+    if ((ret = chidb_Pager_readPage(bt->pager, npage, &mem_page)) != CHIDB_OK) {
+        return ret;
     }
-    memset(page_buf, '\0', bt->pager->page_size);
+    mem_page->npage = npage;
+
     int page_off = 0;
     if (npage == 1) {
-        page_off = HEADER_BUF_SIZE;
-        fseek(bt->pager->f, 0L, SEEK_SET);
-        if (fread(page_buf, HEADER_BUF_SIZE, 1, bt->pager->f) != 1) {
-            return CHIDB_ECORRUPTHEADER;
-        }
+        page_off = HEADER_OFFSET;
     }
-
     uint16_t free_offset;
     ncell_t n_cells = 0;
     uint16_t cells_offset = bt->pager->page_size;
@@ -449,25 +431,20 @@ int chidb_Btree_initEmptyNode(BTree *bt, npage_t npage, uint8_t type)
     }
 
     uint8_t arr2[2];
-    memcpy(&page_buf[page_off + PGHEADER_PGTYPE_OFFSET], &type, sizeof(uint8_t));
+    memcpy(&mem_page->data[page_off + PGHEADER_PGTYPE_OFFSET], &type, sizeof(uint8_t));
 
     arr2[0] = (free_offset >> 8) & 0xff;
     arr2[1] = free_offset & 0xff;
-    memcpy(&page_buf[page_off + PGHEADER_FREE_OFFSET], &arr2, sizeof(uint16_t));
+    memcpy(&mem_page->data[page_off + PGHEADER_FREE_OFFSET], &arr2, sizeof(uint16_t));
     arr2[0] = (n_cells >> 8) & 0xff;
     arr2[1] = n_cells & 0xff;
-    memcpy(&page_buf[page_off + PGHEADER_NCELLS_OFFSET], &arr2, sizeof(uint16_t));
+    memcpy(&mem_page->data[page_off + PGHEADER_NCELLS_OFFSET], &arr2, sizeof(uint16_t));
     arr2[0] = (cells_offset >> 8) & 0xff;
     arr2[1] = cells_offset & 0xff;
-    memcpy(&page_buf[page_off + PGHEADER_CELL_OFFSET], &arr2, sizeof(uint16_t));
+    memcpy(&mem_page->data[page_off + PGHEADER_CELL_OFFSET], &arr2, sizeof(uint16_t));
 
-    long offset = (long)((npage - 1) * bt->pager->page_size);
-    fseek(bt->pager->f, offset, SEEK_SET);
-    if (fwrite(page_buf, bt->pager->page_size, 1, bt->pager->f) != 1) {
-        return CHIDB_EIO;
-    }
-    if (fflush(bt->pager->f) != 0) {
-        return CHIDB_EIO;
+    if ((ret = chidb_Pager_writePage(bt->pager, mem_page)) != CHIDB_OK) {
+        return ret;
     }
 
     return CHIDB_OK;
@@ -497,7 +474,7 @@ int chidb_Btree_writeNode(BTree *bt, BTreeNode *btn)
     /* Your code goes here */
     int page_off = 0;
     if (btn->page->npage == 1) {
-        page_off = 100;
+        page_off = HEADER_OFFSET;
     }
     uint8_t arr2[2];
     uint8_t arr4[4];
@@ -518,13 +495,9 @@ int chidb_Btree_writeNode(BTree *bt, BTreeNode *btn)
         arr4[3] = btn->right_page & 0xff;
         memcpy(&btn->page->data[page_off + 8], &arr4, sizeof(uint32_t));
     }
-    long offset = (long)((btn->page->npage - 1) * bt->pager->page_size);
-    fseek(bt->pager->f, offset, SEEK_SET);
-    if (fwrite(btn->page->data, bt->pager->page_size, 1, bt->pager->f) != 1) {
-        return CHIDB_EIO;
-    }
-    if (fflush(bt->pager->f) != 0) {
-        return CHIDB_EIO;
+    int ret;
+    if ((ret = chidb_Pager_writePage(bt->pager, btn->page)) != CHIDB_OK) {
+        return ret;
     }
 
     return CHIDB_OK;
@@ -554,7 +527,7 @@ int chidb_Btree_getCell(BTreeNode *btn, ncell_t ncell, BTreeCell *cell)
     /* Your code goes here */
     uint16_t off = 0;
     if (btn->page->npage == 1) {
-        off += HEADER_BUF_SIZE;
+        off += HEADER_OFFSET;
     }
     uint16_t idx_off;
     uint16_t cell_off;
@@ -792,42 +765,31 @@ int chidb_Btree_find(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t **data, 
 {
     /* Your code goes here */
     int ret;
-    BTreeNode *btn = malloc(sizeof(BTreeNode));
-    if (btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, nroot, &btn);
-    if (ret != CHIDB_OK) {
-        chidb_Btree_freeMemNode(bt, btn);
+    BTreeNode *btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, nroot, &btn)) != CHIDB_OK) {
         return ret;
     }
-    BTreeCell *cell = malloc(sizeof(BTreeCell));
-    if (cell == NULL) {
-        chidb_Btree_freeMemNode(bt, btn);
-        return CHIDB_ENOMEM;
-    }
+    BTreeCell cell;
     for (ncell_t i = 0; i < btn->n_cells; i++) {
-        ret = chidb_Btree_getCell(btn, i, cell);
-        if (ret != CHIDB_OK) {
-            chidb_Btree_freeMemNode(bt, btn);
+        if ((ret = chidb_Btree_getCell(btn, i, &cell)) != CHIDB_OK) {
             return ret;
         }
-        switch (cell->type) {
+        switch (cell.type) {
         case PGTYPE_TABLE_INTERNAL:
-            if (key <= cell->key) {
-                return chidb_Btree_find(bt, cell->fields.tableInternal.child_page, key, data, size);
+            if (key <= cell.key) {
+                return chidb_Btree_find(bt, cell.fields.tableInternal.child_page, key, data, size);
             }
             break;
         case PGTYPE_TABLE_LEAF:
-            if (key == cell->key) {
-                *size = cell->fields.tableLeaf.data_size;
-                *data = malloc(cell->fields.tableLeaf.data_size);
+            if (key == cell.key) {
+                *size = cell.fields.tableLeaf.data_size;
+                *data = malloc(cell.fields.tableLeaf.data_size);
                 if (*data == NULL) {
                     return CHIDB_ENOMEM;
                 }
-                memcpy(*data, &cell->fields.tableLeaf.data[0], cell->fields.tableLeaf.data_size);
+                memcpy(*data, &cell.fields.tableLeaf.data[0], cell.fields.tableLeaf.data_size);
                 return CHIDB_OK;
-            } else if (key < cell->key) {
+            } else if (key < cell.key) {
                 return CHIDB_ENOTFOUND;
             }
             break;
@@ -844,7 +806,6 @@ int chidb_Btree_find(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t **data, 
             return chidb_Btree_find(bt, btn->right_page, key, data, size);
         }
     }
-    chidb_Btree_freeMemNode(bt, btn);
 
     return CHIDB_ENOTFOUND;
 }
@@ -874,16 +835,13 @@ int chidb_Btree_find(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t **data, 
 int chidb_Btree_insertInTable(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t *data, uint16_t size)
 {
     /* Your code goes here */
-    BTreeCell *btc = malloc(sizeof(BTreeCell));
-    if (btc == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    btc->type = PGTYPE_TABLE_LEAF;
-    btc->key = key;
-    btc->fields.tableLeaf.data_size = size;
-    btc->fields.tableLeaf.data = data;
+    BTreeCell btc;
+    btc.type = PGTYPE_TABLE_LEAF;
+    btc.key = key;
+    btc.fields.tableLeaf.data_size = size;
+    btc.fields.tableLeaf.data = data;
 
-    return chidb_Btree_insert(bt, nroot, btc);
+    return chidb_Btree_insert(bt, nroot, &btc);
 }
 
 
@@ -909,15 +867,12 @@ int chidb_Btree_insertInTable(BTree *bt, npage_t nroot, chidb_key_t key, uint8_t
 int chidb_Btree_insertInIndex(BTree *bt, npage_t nroot, chidb_key_t keyIdx, chidb_key_t keyPk)
 {
     /* Your code goes here */
-    BTreeCell *btc = malloc(sizeof(BTreeCell));
-    if (btc == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    btc->type = PGTYPE_INDEX_LEAF;
-    btc->key = keyIdx;
-    btc->fields.indexLeaf.keyPk = keyPk;
+    BTreeCell btc;
+    btc.type = PGTYPE_INDEX_LEAF;
+    btc.key = keyIdx;
+    btc.fields.indexLeaf.keyPk = keyPk;
 
-    return chidb_Btree_insert(bt, nroot, btc);
+    return chidb_Btree_insert(bt, nroot, &btc);
 }
 
 
@@ -947,12 +902,8 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
 {
     /* Your code goes here */
     int ret;
-    BTreeNode *btn = malloc(sizeof(BTreeNode));
-    if (btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, nroot, &btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, nroot, &btn)) != CHIDB_OK) {
         return ret;
     }
 
@@ -986,12 +937,10 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
         // write left child node
         npage_t left_page;
         BTreeNode *left_btn;
-        ret = chidb_Btree_newNode(bt, &left_page, btn->type);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_newNode(bt, &left_page, btn->type)) != CHIDB_OK) {
             return ret;
         }
-        ret = chidb_Btree_getNodeByPage(bt, left_page, &left_btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getNodeByPage(bt, left_page, &left_btn)) != CHIDB_OK) {
             return ret;
         }
         // insert left cell
@@ -1000,52 +949,43 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
             left_mid_cell--;
         }
         for (ncell_t i = 0; i <= left_mid_cell; i++) {
-            ret = chidb_Btree_getCell(btn, i, &root_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_getCell(btn, i, &root_btc)) != CHIDB_OK) {
                 return ret;
             }
-            ret = chidb_Btree_insertCell(left_btn, i, &root_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_insertCell(left_btn, i, &root_btc)) != CHIDB_OK) {
                 return ret;
             }
         }
-        ret = chidb_Btree_writeNode(bt, left_btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_writeNode(bt, left_btn)) != CHIDB_OK) {
             return ret;
         }
 
         // write right child node
         npage_t right_page;
         BTreeNode *right_btn;
-        ret = chidb_Btree_newNode(bt, &right_page, btn->type);
-        if (ret != CHIDB_OK) {
-            return ret;
+        if ((ret = chidb_Btree_newNode(bt, &right_page, btn->type)) != CHIDB_OK) {
+           return ret;
         }
-        ret = chidb_Btree_getNodeByPage(bt, right_page, &right_btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getNodeByPage(bt, right_page, &right_btn)) != CHIDB_OK) {
             return ret;
         }
         int j = 0;
         for (ncell_t i = mid_cell + 1; i < btn->n_cells; i++) {
-            ret = chidb_Btree_getCell(btn, i, &root_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_getCell(btn, i, &root_btc)) != CHIDB_OK) {
                 return ret;
             }
-            ret = chidb_Btree_insertCell(right_btn, j, &root_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_insertCell(right_btn, j, &root_btc)) != CHIDB_OK) {
                 return ret;
             }
             j++;
         }
         right_btn->right_page = btn->right_page;
-        ret = chidb_Btree_writeNode(bt, right_btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_writeNode(bt, right_btn)) != CHIDB_OK) {
             return ret;
         }
 
         // write root node
-        ret = chidb_Btree_getCell(btn, mid_cell, &root_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getCell(btn, mid_cell, &root_btc)) != CHIDB_OK) {
             return ret;
         }
 
@@ -1055,12 +995,10 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
         } else if (btn->type == PGTYPE_INDEX_INTERNAL || btn->type == PGTYPE_INDEX_LEAF) {
             new_type = PGTYPE_INDEX_INTERNAL;
         }
-        ret = chidb_Btree_initEmptyNode(bt, nroot, new_type);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_initEmptyNode(bt, nroot, new_type)) != CHIDB_OK) {
             return ret;
         }
-        ret = chidb_Btree_getNodeByPage(bt, nroot, &btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getNodeByPage(bt, nroot, &btn)) != CHIDB_OK) {
             return ret;
         }
         root_btc.type = new_type;
@@ -1072,13 +1010,11 @@ int chidb_Btree_insert(BTree *bt, npage_t nroot, BTreeCell *btc)
             root_btc.fields.indexInternal.child_page = left_page;
             break;
         }
-        ret = chidb_Btree_insertCell(btn, 0, &root_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_insertCell(btn, 0, &root_btc)) != CHIDB_OK) {
             return ret;
         }
         btn->right_page = right_page;
-        ret = chidb_Btree_writeNode(bt, btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_writeNode(bt, btn)) != CHIDB_OK) {
             return ret;
         }
     }
@@ -1113,40 +1049,30 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
 {
     /* Your code goes here */
     int ret;
-    BTreeNode *btn = malloc(sizeof(BTreeNode));
-    if (btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, npage, &btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, npage, &btn)) != CHIDB_OK) {
         return ret;
     }
     // if cell in leaf node, insert directly
     if (btn->type == PGTYPE_TABLE_LEAF || btn->type == PGTYPE_INDEX_LEAF) {
         ncell_t insert_cell = btn->n_cells;
-        BTreeCell *orig_btc = malloc(sizeof(BTreeCell));
-        if (orig_btc == NULL) {
-            return CHIDB_ENOMEM;
-        }
+        BTreeCell orig_btc;
         for (ncell_t i = 0; i < btn->n_cells; i++) {
-            ret = chidb_Btree_getCell(btn, i, orig_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_getCell(btn, i, &orig_btc)) != CHIDB_OK) {
                 return ret;
             }
-            if (btc->key == orig_btc->key) {
+            if (btc->key == orig_btc.key) {
                 return CHIDB_EDUPLICATE;
-            } else if (btc->key < orig_btc->key) {
+            } else if (btc->key < orig_btc.key) {
                 insert_cell = i;
                 break;
             }
         }
 
-        ret = chidb_Btree_insertCell(btn, insert_cell, btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_insertCell(btn, insert_cell, btc)) != CHIDB_OK) {
             return ret;
         }
-        ret = chidb_Btree_writeNode(bt, btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_writeNode(bt, btn)) != CHIDB_OK) {
             return ret;
         }
 
@@ -1159,30 +1085,26 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
     // 3. insert cell to child node
     ncell_t parent_cell = btn->n_cells;
     npage_t child_page = btn->right_page;
-    BTreeCell *search_btc = malloc(sizeof(BTreeCell));
-    if (search_btc == NULL) {
-        return CHIDB_ENOMEM;
-    }
+    BTreeCell search_btc;
     uint8_t find_child = 0;
     for (ncell_t i = 0; i < btn->n_cells; i++) {
-        ret = chidb_Btree_getCell(btn, i, search_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getCell(btn, i, &search_btc)) != CHIDB_OK) {
             return ret;
         }
         switch (btn->type) {
         case PGTYPE_TABLE_INTERNAL:
-            if (btc->key <= search_btc->key) {
+            if (btc->key <= search_btc.key) {
                 parent_cell = i;
-                child_page = search_btc->fields.tableInternal.child_page;
+                child_page = search_btc.fields.tableInternal.child_page;
                 find_child = 1;
             }
             break;
         case PGTYPE_INDEX_INTERNAL:
-            if (btc->key == search_btc->key) {
+            if (btc->key == search_btc.key) {
                 return CHIDB_EDUPLICATE;
-            } else if (btc->key < search_btc->key) {
+            } else if (btc->key < search_btc.key) {
                 parent_cell = i;
-                child_page = search_btc->fields.indexInternal.child_page;
+                child_page = search_btc.fields.indexInternal.child_page;
                 find_child = 1;
             }
             break;
@@ -1192,16 +1114,12 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
         }
     }
 
-    BTreeNode *child_btn = malloc(sizeof(BTreeNode));
-    if (child_btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
+    BTreeNode *child_btn;
     if (child_page > 0) {
         // check child is full
         uint8_t is_full = 0;
         uint16_t free_space = 0;
-        ret = chidb_Btree_getNodeByPage(bt, child_page, &child_btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getNodeByPage(bt, child_page, &child_btn)) != CHIDB_OK) {
             return ret;
         }
         free_space = child_btn->cells_offset - child_btn->free_offset;
@@ -1230,19 +1148,16 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
         // split page
         if (is_full == 1) {
             npage_t child_page2 = 0;
-            ret = chidb_Btree_split(bt, npage, child_page, parent_cell, &child_page2);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_split(bt, npage, child_page, parent_cell, &child_page2)) != CHIDB_OK) {
                 return ret;
             }
-            ret = chidb_Btree_getNodeByPage(bt, npage, &btn);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_getNodeByPage(bt, npage, &btn)) != CHIDB_OK) {
                 return ret;
             }
-            ret = chidb_Btree_getCell(btn, parent_cell, search_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_getCell(btn, parent_cell, &search_btc)) != CHIDB_OK) {
                 return ret;
             }
-            if (btc->key <= search_btc->key) {
+            if (btc->key <= search_btc.key) {
                 child_page = child_page2;
             }
         }
@@ -1254,8 +1169,7 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
         } else if (btn->type == PGTYPE_INDEX_INTERNAL) {
             child_type = PGTYPE_INDEX_LEAF;
         }
-        ret = chidb_Btree_newNode(bt, &child_page, child_type);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_newNode(bt, &child_page, child_type)) != CHIDB_OK) {
             return ret;
         }
         if (btn->n_cells != 0) {
@@ -1273,13 +1187,11 @@ int chidb_Btree_insertNonFull(BTree *bt, npage_t npage, BTreeCell *btc)
                 parent_btc.fields.indexInternal.child_page = child_page;
                 break;
             }
-            ret = chidb_Btree_insertCell(btn, 0, &parent_btc);
-            if (ret != CHIDB_OK) {
+            if ((ret = chidb_Btree_insertCell(btn, 0, &parent_btc)) != CHIDB_OK) {
                 return ret;
             }
         }
-        ret = chidb_Btree_writeNode(bt, btn);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_writeNode(bt, btn)) != CHIDB_OK) {
             return ret;
         }
         if (btn->type == PGTYPE_INDEX_INTERNAL) {
@@ -1318,48 +1230,30 @@ int chidb_Btree_split(BTree *bt, npage_t npage_parent, npage_t npage_child, ncel
 {
     /* Your code goes here */
     int ret;
-    BTreeNode *parent_btn = malloc(sizeof(BTreeNode));
-    if (parent_btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, npage_parent, &parent_btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *parent_btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, npage_parent, &parent_btn)) != CHIDB_OK) {
         return ret;
     }
-    BTreeNode *orig_btn = malloc(sizeof(BTreeNode));
-    if (orig_btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, npage_child, &orig_btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *orig_btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, npage_child, &orig_btn)) != CHIDB_OK) {
         return ret;
     }
 
     // new node at left
     npage_t left_page;
-    ret = chidb_Btree_newNode(bt, &left_page, orig_btn->type);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_newNode(bt, &left_page, orig_btn->type)) != CHIDB_OK) {
         return ret;
     }
-    BTreeNode *left_btn = malloc(sizeof(BTreeNode));
-    if (left_btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, left_page, &left_btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *left_btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, left_page, &left_btn)) != CHIDB_OK) {
         return ret;
     }
     // old node at right
-    ret = chidb_Btree_initEmptyNode(bt, npage_child, orig_btn->type);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_initEmptyNode(bt, npage_child, orig_btn->type)) != CHIDB_OK) {
         return ret;
     }
-    BTreeNode *right_btn = malloc(sizeof(BTreeNode));
-    if (right_btn == NULL) {
-        return CHIDB_ENOMEM;
-    }
-    ret = chidb_Btree_getNodeByPage(bt, npage_child, &right_btn);
-    if (ret != CHIDB_OK) {
+    BTreeNode *right_btn;
+    if ((ret = chidb_Btree_getNodeByPage(bt, npage_child, &right_btn)) != CHIDB_OK) {
         return ret;
     }
 
@@ -1371,43 +1265,36 @@ int chidb_Btree_split(BTree *bt, npage_t npage_parent, npage_t npage_child, ncel
         left_mid_cell--;
     }
     for (ncell_t i = 0; i <= left_mid_cell; i++) {
-        ret = chidb_Btree_getCell(orig_btn, i, &orig_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getCell(orig_btn, i, &orig_btc)) != CHIDB_OK) {
             return ret;
         }
-        ret = chidb_Btree_insertCell(left_btn, i, &orig_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_insertCell(left_btn, i, &orig_btc)) != CHIDB_OK) {
             return ret;
         }
     }
-    ret = chidb_Btree_writeNode(bt, left_btn);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_writeNode(bt, left_btn)) != CHIDB_OK) {
         return ret;
     }
 
     // insert right cell
     ncell_t j = 0;
     for (ncell_t i = mid_cell + 1; i < orig_btn->n_cells; i++) {
-        ret = chidb_Btree_getCell(orig_btn, i, &orig_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_getCell(orig_btn, i, &orig_btc)) != CHIDB_OK) {
             return ret;
         }
-        ret = chidb_Btree_insertCell(right_btn, j, &orig_btc);
-        if (ret != CHIDB_OK) {
+        if ((ret = chidb_Btree_insertCell(right_btn, j, &orig_btc)) != CHIDB_OK) {
             return ret;
         }
         j++;
     }
     right_btn->right_page = orig_btn->right_page;
-    ret = chidb_Btree_writeNode(bt, right_btn);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_writeNode(bt, right_btn)) != CHIDB_OK) {
         return ret;
     }
 
     // insert parent cell
     BTreeCell new_btc;
-    ret = chidb_Btree_getCell(orig_btn, mid_cell, &orig_btc);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_getCell(orig_btn, mid_cell, &orig_btc)) != CHIDB_OK) {
         return ret;
     }
     new_btc.type = parent_btn->type;
@@ -1421,12 +1308,10 @@ int chidb_Btree_split(BTree *bt, npage_t npage_parent, npage_t npage_child, ncel
         new_btc.fields.indexInternal.keyPk = orig_btc.fields.indexInternal.keyPk;
         break;
     }
-    ret = chidb_Btree_insertCell(parent_btn, parent_ncell, &new_btc);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_insertCell(parent_btn, parent_ncell, &new_btc)) != CHIDB_OK) {
         return ret;
     }
-    ret = chidb_Btree_writeNode(bt, parent_btn);
-    if (ret != CHIDB_OK) {
+    if ((ret = chidb_Btree_writeNode(bt, parent_btn)) != CHIDB_OK) {
         return ret;
     }
     *npage_child2 = left_page;
