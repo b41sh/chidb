@@ -51,15 +51,40 @@ typedef enum chidb_dbm_cursor_type
     CURSOR_WRITE
 } chidb_dbm_cursor_type_t;
 
+typedef struct chidb_dbm_cursor_node_list {
+    npage_t npage;
+    ncell_t ncell;
+    uint8_t is_right;
+    BTreeNode *btn;
+
+    struct chidb_dbm_cursor_node_list *parent;
+} chidb_dbm_cursor_node_list_t;
+
 typedef struct chidb_dbm_cursor
 {
     chidb_dbm_cursor_type_t type;
 
     /* Your code goes here */
+    npage_t nroot;
+    int32_t col_num;
 
+    chidb_dbm_cursor_node_list_t *node_list;
 } chidb_dbm_cursor_t;
 
 /* Cursor function definitions go here */
+
+int chidb_cursor_open(chidb_dbm_cursor_type_t type, npage_t nroot, int32_t col_num, chidb_dbm_cursor_t *cursor);
+int chidb_cursor_close(BTree *bt, chidb_dbm_cursor_t *cursor);
+
+int chidb_cursor_rewind(BTree *bt, chidb_dbm_cursor_t *cursor);
+int chidb_cursor_next(BTree *bt, chidb_dbm_cursor_t *cursor);
+int chidb_cursor_prev(BTree *bt, chidb_dbm_cursor_t *cursor);
+
+int chidb_cursor_seek(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
+int chidb_cursor_seek_gt(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
+int chidb_cursor_seek_ge(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
+int chidb_cursor_seek_lt(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
+int chidb_cursor_seek_le(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
 
 
 #endif /* DBM_CURSOR_H_ */

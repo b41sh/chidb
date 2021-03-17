@@ -90,6 +90,9 @@ int chidb_dbm_op_Noop (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_OpenRead (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int32_t npage = stmt->reg[op->p2].value.i;
+    int32_t col_num = op->p3;
+    chidb_cursor_open(CURSOR_READ, npage, col_num, &stmt->cursors[op->p1]);
 
     return CHIDB_OK;
 }
@@ -98,6 +101,9 @@ int chidb_dbm_op_OpenRead (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_OpenWrite (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int32_t npage = stmt->reg[op->p2].value.i;
+    int32_t col_num = op->p3;
+    chidb_cursor_open(CURSOR_WRITE, npage, col_num, &stmt->cursors[op->p1]);
 
     return CHIDB_OK;
 }
@@ -106,6 +112,10 @@ int chidb_dbm_op_OpenWrite (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Close (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    if ((ret = chidb_cursor_close(stmt->db->bt, &stmt->cursors[op->p1])) != CHIDB_OK) {
+        return ret;
+    }
 
     return CHIDB_OK;
 }
@@ -114,6 +124,14 @@ int chidb_dbm_op_Close (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Rewind (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    ret = chidb_cursor_rewind(stmt->db->bt, &stmt->cursors[op->p1]);
+    if (ret != CHIDB_EEMPTY && ret != CHIDB_OK) {
+        return ret;
+    }
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -122,6 +140,11 @@ int chidb_dbm_op_Rewind (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Next (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    ret = chidb_cursor_next(stmt->db->bt, &stmt->cursors[op->p1]);
+    if (ret == CHIDB_OK) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -130,6 +153,11 @@ int chidb_dbm_op_Next (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Prev (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    ret = chidb_cursor_prev(stmt->db->bt, &stmt->cursors[op->p1]);
+    if (ret == CHIDB_OK) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -138,6 +166,12 @@ int chidb_dbm_op_Prev (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Seek (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key = stmt->reg[op->p3].value.i;
+    ret = chidb_cursor_seek(stmt->db->bt, &stmt->cursors[op->p1], key);
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -146,6 +180,12 @@ int chidb_dbm_op_Seek (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_SeekGt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key = stmt->reg[op->p3].value.i;
+    ret = chidb_cursor_seek_gt(stmt->db->bt, &stmt->cursors[op->p1], key);
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -154,6 +194,12 @@ int chidb_dbm_op_SeekGt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_SeekGe (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key = stmt->reg[op->p3].value.i;
+    ret = chidb_cursor_seek_ge(stmt->db->bt, &stmt->cursors[op->p1], key);
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -161,6 +207,12 @@ int chidb_dbm_op_SeekGe (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_SeekLt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key = stmt->reg[op->p3].value.i;
+    ret = chidb_cursor_seek_lt(stmt->db->bt, &stmt->cursors[op->p1], key);
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
@@ -169,6 +221,12 @@ int chidb_dbm_op_SeekLt (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_SeekLe (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key = stmt->reg[op->p3].value.i;
+    ret = chidb_cursor_seek_le(stmt->db->bt, &stmt->cursors[op->p1], key);
+    if (ret == CHIDB_EEMPTY) {
+        stmt->pc = op->p2;
+    }
 
     return CHIDB_OK;
 }
