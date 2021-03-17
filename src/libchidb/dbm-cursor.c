@@ -370,11 +370,8 @@ int chidb_cursor_seek_ge(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key)
         if ((ret = chidb_Btree_getCell(cursor->node_list->btn, cursor->node_list->ncell, &btc)) != CHIDB_OK) {
             break;
         }
-        if (key == btc.key) {
+        if (key <= btc.key) {
             return CHIDB_OK;
-        } else if (key < btc.key) {
-            chidb_cursor_prev(bt, cursor);
-            break;
         }
         if ((ret = chidb_cursor_next(bt, cursor)) != CHIDB_OK) {
             break;
@@ -393,12 +390,10 @@ int chidb_cursor_seek_lt(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key)
         if ((ret = chidb_Btree_getCell(cursor->node_list->btn, cursor->node_list->ncell, &btc)) != CHIDB_OK) {
             break;
         }
-        if (key == btc.key) {
+        if (key <= btc.key) {
             if ((ret = chidb_cursor_prev(bt, cursor)) != CHIDB_OK) {
                 break;
             }
-            return CHIDB_OK;
-        } else if (key < btc.key) {
             return CHIDB_OK;
         }
         if ((ret = chidb_cursor_next(bt, cursor)) != CHIDB_OK) {
@@ -418,7 +413,12 @@ int chidb_cursor_seek_le(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key)
         if ((ret = chidb_Btree_getCell(cursor->node_list->btn, cursor->node_list->ncell, &btc)) != CHIDB_OK) {
             break;
         }
-        if (key <= btc.key) {
+        if (key == btc.key) {
+            return CHIDB_OK;
+        } else if (key < btc.key) {
+            if ((ret = chidb_cursor_prev(bt, cursor)) != CHIDB_OK) {
+                break;
+            }
             return CHIDB_OK;
         }
         if ((ret = chidb_cursor_next(bt, cursor)) != CHIDB_OK) {
@@ -426,5 +426,86 @@ int chidb_cursor_seek_le(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key)
         }
     }
     return ret;
+}
+
+int chidb_cursor_fetch_key(BTree *bt, chidb_dbm_cursor_t *cursor, int32_t *key) {
+    int ret;
+    BTreeCell btc;
+    if ((ret = chidb_Btree_getCell(cursor->node_list->btn, cursor->node_list->ncell, &btc)) != CHIDB_OK) {
+        return ret;
+    }
+    *key = btc.key;
+
+    return CHIDB_OK;
+}
+
+int chidb_cursor_fetch_col(BTree *bt, chidb_dbm_cursor_t *cursor, int n,
+                uint8_t *type, int32_t *num, char **str) {
+    int ret;
+    BTreeCell btc;
+    if ((ret = chidb_Btree_getCell(cursor->node_list->btn, cursor->node_list->ncell, &btc)) != CHIDB_OK) {
+        return ret;
+    }
+    //uint32_t data_size = btc.fields.tableLeaf.data_size;
+    uint8_t *data = btc.fields.tableLeaf.data;
+    uint8_t header_size = data[0];
+
+    int cell_off = 1;
+    int data_off = header_size;
+    int field_len;
+    for (int i = 0; i < cursor->col_num; i++) {
+        if ((data[cell_off] & 0x80) == 0x80) {
+            field_len = (data[cell_off] & 0x7f) << 21 |
+                (data[cell_off + 1] & 0x7f) << 14 |
+                (data[cell_off + 2] & 0x7f) << 7 |
+                (data[cell_off + 3] & 0x7f);
+            cell_off += 4;
+        } else {
+            field_len = data[cell_off] & 0x7f;
+            cell_off += 1;
+        }
+
+        if (field_len == 0) {
+            if (i == n) {
+                *type = 1;
+                return CHIDB_OK;
+            }
+            continue;
+        } else if (field_len == 1) {
+            if (i == n) {
+                *type = 2;
+                *num = data[data_off];
+                return CHIDB_OK;
+            }
+            data_off++;
+        } else if (field_len == 2) {
+            if (i == n) {
+                *type = 2;
+                *num = data[data_off] << 8 | data[data_off + 1];
+                return CHIDB_OK;
+            }
+            data_off += 2;
+        } else if (field_len == 4) {
+            if (i == n) {
+                *type = 2;
+                *num = data[data_off] << 24 | data[data_off + 1] << 16 |
+                        data[data_off + 2] << 8 | data[data_off + 3];
+                return CHIDB_OK;
+            }
+            data_off += 4;
+        } else {
+            field_len = (field_len - 13) / 2;
+            if (i == n) {
+                *str = malloc(field_len + 1);
+                memset(*str, '\0', field_len + 1);
+                memcpy(*str, &data[data_off], field_len);
+                *type = 3;
+                return CHIDB_OK;
+            }
+            data_off += field_len;
+        }
+    }
+
+    return CHIDB_OK;
 }
 

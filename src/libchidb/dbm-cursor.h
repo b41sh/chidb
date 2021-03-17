@@ -86,5 +86,8 @@ int chidb_cursor_seek_ge(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key)
 int chidb_cursor_seek_lt(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
 int chidb_cursor_seek_le(BTree *bt, chidb_dbm_cursor_t *cursor, chidb_key_t key);
 
+int chidb_cursor_fetch_key(BTree *bt, chidb_dbm_cursor_t *cursor, int32_t *key);
+int chidb_cursor_fetch_col(BTree *bt, chidb_dbm_cursor_t *cursor, int n,
+                            uint8_t *type, int32_t *num, char **str);
 
 #endif /* DBM_CURSOR_H_ */

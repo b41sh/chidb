@@ -234,6 +234,30 @@ int chidb_dbm_op_SeekLe (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Column (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int n = op->p2;
+    uint8_t type;
+    int32_t num;
+    char *str;
+    ret = chidb_cursor_fetch_col(stmt->db->bt, &stmt->cursors[op->p1], n,
+                                &type, &num, &str);
+
+    if (ret != CHIDB_OK) {
+        return ret;
+    }
+    stmt->reg[op->p3].type = type;
+    switch (type) {
+    case 1:
+        break;
+    case 2:
+        stmt->reg[op->p3].value.i = num;
+        break;
+    case 3:
+        stmt->reg[op->p3].value.s = str;
+        break;
+    default:
+        break;
+    }
 
     return CHIDB_OK;
 }
@@ -242,6 +266,14 @@ int chidb_dbm_op_Column (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_Key (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    int ret;
+    int32_t key;
+    ret = chidb_cursor_fetch_key(stmt->db->bt, &stmt->cursors[op->p1], &key);
+    if (ret != CHIDB_OK) {
+        return ret;
+    }
+    stmt->reg[op->p2].type = REG_INT32;
+    stmt->reg[op->p2].value.i = key;
 
     return CHIDB_OK;
 }
@@ -279,8 +311,11 @@ int chidb_dbm_op_Null (chidb_stmt *stmt, chidb_dbm_op_t *op)
 int chidb_dbm_op_ResultRow (chidb_stmt *stmt, chidb_dbm_op_t *op)
 {
     /* Your code goes here */
+    stmt->startRR = op->p1;
+    stmt->nRR = op->p2;
+    stmt->nCols = op->p2;
 
-    return CHIDB_OK;
+    return CHIDB_ROW;
 }
 
 
